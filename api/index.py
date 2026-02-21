@@ -1,47 +1,55 @@
-from http.server import BaseHTTPRequestHandler
 import json
-import numpy as np
 
-# Load telemetry data once
 with open("q-vercel-latency.json") as f:
     DATA = json.load(f)
 
-class handler(BaseHTTPRequestHandler):
+def mean(values):
+    return sum(values) / len(values) if values else 0
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+def percentile(values, p):
+    if not values:
+        return 0
+    values = sorted(values)
+    k = int(len(values) * p / 100)
+    return values[min(k, len(values)-1)]
 
-    def do_POST(self):
+def handler(request):
 
-        content_length = int(self.headers["Content-Length"])
-        body = self.rfile.read(content_length)
-        payload = json.loads(body)
+    if request.method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type"
+            },
+            "body": ""
+        }
 
-        regions = payload.get("regions", [])
-        threshold = payload.get("threshold_ms", 0)
+    body = json.loads(request.body)
+    regions = body.get("regions", [])
+    threshold = body.get("threshold_ms", 0)
 
-        result = {}
+    result = {}
 
-        for r in regions:
-            rows = [x for x in DATA if x["region"] == r]
+    for r in regions:
+        rows = [x for x in DATA if x["region"] == r]
 
-            latencies = [x["latency_ms"] for x in rows]
-            uptimes = [x["uptime"] for x in rows]
+        latencies = [x["latency_ms"] for x in rows]
+        uptimes = [x["uptime"] for x in rows]
 
-            result[r] = {
-                "avg_latency": float(np.mean(latencies)) if latencies else 0,
-                "p95_latency": float(np.percentile(latencies,95)) if latencies else 0,
-                "avg_uptime": float(np.mean(uptimes)) if uptimes else 0,
-                "breaches": len([x for x in latencies if x > threshold])
-            }
+        result[r] = {
+            "avg_latency": mean(latencies),
+            "p95_latency": percentile(latencies, 95),
+            "avg_uptime": mean(uptimes),
+            "breaches": len([x for x in latencies if x > threshold])
+        }
 
-        self.send_response(200)
-        self.send_header("Content-Type","application/json")
-        self.send_header("Access-Control-Allow-Origin","*")
-        self.end_headers()
-
-        self.wfile.write(json.dumps(result).encode())
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
+        "body": json.dumps(result)
+    }
